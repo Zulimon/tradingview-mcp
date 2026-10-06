@@ -4,6 +4,102 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **TradingView interval codes rejected as timeframes**: `"60"`, `"240"`,
+  `"15"`, `"5"`, `"1440"`, `"D"` and `"W"` are now accepted and mapped to
+  `1h`, `4h`, `15m`, `5m` and `1D` / `1W`. Integrations sending TradingView's
+  native codes used to silently get the tool's default timeframe instead
+  (a `"60"` request returned 15m data), and since 0.9.0's strict validation
+  they got `INVALID_TIMEFRAME`. Unsupported intervals (`30m`, `120`, ...)
+  still fail loudly.
+- **Futures watchlist returned nothing for the main US index futures** (#98):
+  `FUTURES_WATCHLIST` used exchange prefixes TradingView's scanner doesn't
+  index (`CME:ES1!` instead of `CME_MINI:ES1!`, likewise NQ, RTY, YM and EMD,
+  plus livestock under `CBOT` instead of `CME`). A wrong prefix returns 0
+  rows without an error, so `futures_watchlist`, `futures_category_snapshot`
+  and `futures_market_overview` were silently empty for those contracts.
+- **Stale US stock coinlists** (#96): `nasdaq.txt` and `nyse.txt` hadn't been
+  refreshed since 2025. About 1,500 entries were no longer listed on that
+  venue, about 1,600 newer listings were missing, and 18 tickers had moved
+  venue (WMT, AZN, KHC, ETSY, QBTS, QS and others), which broke error
+  suggestions, venue fallback and exchange-level scan coverage. Regenerated
+  from the scanner.
+
+### Added
+- `scripts/refresh_us_coinlists.py` rebuilds the US stock coinlists from the
+  scanner. `--check` reports drift without writing (exit 1 if stale), and a
+  guard refuses to write a list that shrank suspiciously.
+
+## [0.9.0] - 2026-08-26
+
+### Changed (behavior)
+- **Strict input validation**: tools now return `INVALID_EXCHANGE` /
+  `INVALID_TIMEFRAME` error envelopes (listing valid values) instead of
+  silently substituting the default — `exchange="KRAKEN"` used to return
+  KUCOIN data with no warning. Aliases (`1d`→`1D`) and omitted parameters
+  still resolve silently.
+- **`PARTIAL_DATA` envelopes**: batched scans that abort mid-flight
+  (wall-clock budget / consecutive-failure bail) return a `PARTIAL_DATA`
+  envelope that still carries the collected rows, instead of a plain list
+  indistinguishable from a complete scan.
+
+### Fixed
+- **`top_losers` returned gainers**: the service sorted descending and
+  truncated to `limit` before the tool re-sorted ascending, so it returned
+  the smallest of the top gainers. Sorting now happens before truncation.
+- **Volume breakout scanner fabricated breakouts**: symbols missing a
+  `volume.SMA20` baseline got a fallback ratio that was always exactly 2.0
+  and passed the default gate on price change alone. They are now skipped.
+- **Walk-forward robustness inverted for losing strategies**: a strategy
+  losing MORE out-of-sample scored a capped 2.0 ("maximally robust") in the
+  both-negative branch. Warmup-starved test folds are flagged
+  `insufficient_data` and excluded instead of reading as OVERFITTED.
+- **Multi-timeframe alignment misattribution**: a failed timeframe shifted
+  every later score onto the wrong timeframe key in `scores_by_tf`.
+- **`fetch_multi_timeframe_patterns` ignored its `symbols` argument**
+  (whole-exchange scan) while caching on it.
+- **Backtest metrics**: drawdown/Calmar/Sharpe now come from a per-bar
+  mark-to-market equity series (intra-trade dips count); open positions at
+  data end are force-closed and flagged `forced_exit`; the buy-and-hold
+  benchmark pays the same round-trip costs as the strategy;
+  `compare_strategies` validates `period`.
+- **Thread safety**: the Yahoo options session handshake is lock-guarded;
+  the screener cache is bounded (256 entries); cached indicator dicts are
+  copied before ATR backfill; the resilience layer's stale-while-error
+  cache is actually populated on success for `cache_key` callers.
+- **Timeouts everywhere**: all `get_scanner_data` calls pass explicit
+  timeouts (`requests` has no default).
+- **Docker HEALTHCHECK**: the server now serves `GET /health` under the
+  streamable-http transport, so containers stop cycling to `unhealthy`.
+- Marketaux sentiment: whole-word keyword scoring and exact entity-symbol
+  matching; multi-agent analysis no longer crashes on explicit-null
+  indicators; proxy credentials are URL-encoded.
+
+### Removed
+- Dead code (~800 lines): the unwired paper-trading `portfolio.py`, the
+  RSS `news_service.py` and Reddit `sentiment_service.py` (both replaced by
+  Marketaux in 0.6), unused fetchers in `screener_provider.py` /
+  `screener_service.py`, and the stray `PR_BODY.md`.
+
+### Infrastructure
+- **CI now runs the test suite** (Python 3.10–3.13 matrix) on every
+  push/PR, and the Docker image publish is gated on it.
+- `pandas` declared as a direct dependency (server.py imports it at module
+  top; it previously arrived only via the tradingview-screener pin).
+- `docker-compose.yml` points at the GHCR image CI actually builds.
+- Real `SECURITY.md` (GitHub Security Advisories; 0.9.x supported).
+
+## [0.8.1] - 2026-08-02
+
+### Fixed
+- Raised the `mcp` lower bound to `>=1.14.0` (still `<2`): with
+  `from __future__ import annotations`, `Tool.from_function` in <=1.13.x
+  dies at import time on string annotations, so the server never started
+  on those SDK versions.
+
+### Added
+- Official MCP Registry manifest (`server.json`) + OIDC publish workflow.
+
 ## [0.8.0] - 2026-07-29
 
 ### Fixed
